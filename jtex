@@ -1,0 +1,95 @@
+#!/bin/bash
+
+# rendeq - Render LaTeX Equation to Clipboard
+# Usage: ./rendeq "equation"
+
+# Check if an argument was provided
+if [ "$#" -ne 1 ]; then
+    echo "Usage: $0 \"equation\""
+    echo "Example: $0 \"x^2+y\""
+    exit 1
+fi
+
+# Check for required dependencies
+dependencies=("pdflatex" "convert" "xclip")
+missing_deps=()
+
+for dep in "${dependencies[@]}"; do
+    if ! command -v "$dep" &> /dev/null; then
+        missing_deps+=("$dep")
+    fi
+done
+
+if [ ${#missing_deps[@]} -ne 0 ]; then
+    echo "Error: Missing required dependencies:"
+    for dep in "${missing_deps[@]}"; do
+        case "$dep" in
+            "pdflatex")
+                echo "  - pdflatex (install texlive-core or texlive-latex-base)"
+                ;;
+            "convert")
+                echo "  - convert (install imagemagick)"
+                ;;
+            "xclip")
+                echo "  - xclip (install xclip)"
+                ;;
+        esac
+    done
+    exit 1
+fi
+
+# Create a temporary directory that will be automatically cleaned up
+TMPDIR=$(mktemp -d)
+trap 'rm -rf "$TMPDIR"' EXIT
+
+# Get the equation from command line argument and escape special characters
+EQUATION="$1"
+
+# Create LaTeX document with improved setup for equation rendering
+cat > "$TMPDIR/equation.tex" << EOF
+\\documentclass[border=10pt]{standalone}
+\\usepackage{amsmath}
+\\usepackage{amssymb}
+\\usepackage{xcolor}
+\\pagecolor{white}
+\\begin{document}
+\\begin{displaymath}
+\\displaystyle $EQUATION
+\\end{displaymath}
+\\end{document}
+EOF
+
+# Compile LaTeX document to PDF
+(cd "$TMPDIR" && pdflatex -interaction=nonstopmode equation.tex >/dev/null 2>&1)
+
+if [ ! -f "$TMPDIR/equation.pdf" ]; then
+    echo "Error: Failed to render the equation."
+    echo "Please check if your LaTeX syntax is correct."
+    # For debugging, show the LaTeX errors
+    cat "$TMPDIR/equation.log"
+    exit 1
+fi
+
+# Convert PDF to PNG with smaller size
+convert -density 300 "$TMPDIR/equation.pdf" -quality 90 -resize 50% "$TMPDIR/equation.png"
+
+# Check if the conversion worked and the file is non-empty
+if [ ! -s "$TMPDIR/equation.png" ]; then
+    echo "Error: Generated PNG is empty."
+    exit 1
+fi
+
+# Copy to clipboard
+if [ -f "$TMPDIR/equation.png" ]; then
+    xclip -selection clipboard -target image/png -i "$TMPDIR/equation.png"
+    echo "Equation rendered and copied to clipboard!"
+    
+    # Debugging info
+    echo "PNG size: $(ls -lh "$TMPDIR/equation.png" | awk '{print $5}')"
+else
+    echo "Error: Failed to convert the equation to image."
+    exit 1
+fi
+
+# Temp files are automatically cleaned up by the trap
+exit 0
